@@ -2,18 +2,14 @@ use clap::{App, Arg, SubCommand};
 use std::io::{self, stdout, Write};
 use crossterm::{queue, cursor};
 use crossterm::style::{self, Colorize};
-use async_std::task;
 
 mod send;
 mod recv;
 mod transport;
 
-pub type AsyncResult<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
-
-
 pub enum AppState {
     Send{
-        to: async_std::net::SocketAddr,
+        to: std::net::SocketAddr,
         files: send::SendFiles
     },
     Recv,
@@ -48,10 +44,10 @@ fn main() -> std::io::Result<()> {
 
     match state {
         AppState::Send{..} => {
-            task::block_on(send::send(&state)).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+            send::send(&state)?;
         },
         AppState::Recv => {
-            recv::recv().map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+            recv::recv()?;
         },
         AppState::Unknown(err) => return Err(io::Error::new(io::ErrorKind::InvalidInput, err))
     }

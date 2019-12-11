@@ -9,6 +9,4 @@ edition = "2018"
 [dependencies]
 clap = "2.33.0"
 crossterm = "0.13.3"
-futures = "0.3.0"
 ipconfig = "0.2.1"
-async-std = { version = "1", features = ["unstable"]}

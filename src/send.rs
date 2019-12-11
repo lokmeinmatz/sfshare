@@ -18,8 +18,8 @@ impl std::fmt::Display for SendFiles {
     }
 }
 use std::path::Path;
-use async_std::io;
-use async_std::net::{TcpStream, SocketAddr};
+use std::io;
+use std::net::{TcpStream, SocketAddr};
 
 
 fn get_file_meta(files: &SendFiles) -> Vec<FileMeta> {
@@ -48,9 +48,9 @@ impl<'a> FileMeta<'a> {
     }
 }
 use crate::transport;
-use async_std::prelude::*;
+use std::io::Read;
 
-pub async fn send(state: &crate::AppState) -> crate::AsyncResult<()> {
+pub  fn send(state: &crate::AppState) -> io::Result<()> {
     #[cfg(debug_assertions)]
     println!("send::send()");
 
@@ -58,17 +58,17 @@ pub async fn send(state: &crate::AppState) -> crate::AsyncResult<()> {
         AppState::Send{to, files} => {
 
             // check if <to> is active (ping)
-            let mut stream : TcpStream = TcpStream::connect(to).await?;
-            transport::send_slice(&mut stream, &[transport::FLAG_PING]).await?;
+            let mut stream : TcpStream = TcpStream::connect(to)?;
+            transport::send_slice(&mut stream, &[transport::flags::PING])?;
             
             // wait for ping
             {
                 let mut answ = [0u8];
-                stream.read_exact(&mut answ).await?;
+                stream.read_exact(&mut answ)?;
 
-                if answ[0] != transport::FLAG_PONG {
+                if answ[0] != transport::flags::PONG {
                     eprintln!("Receiver can't be reached. Make sure that both are connected to the same network and sfshare is running in recv mode.");
-                    return Err(Box::new(io::Error::new(io::ErrorKind::NotConnected, "Not reachable")));
+                    return Err(io::Error::new(io::ErrorKind::NotConnected, "Not reachable"));
                 }
             }
 
@@ -76,7 +76,7 @@ pub async fn send(state: &crate::AppState) -> crate::AsyncResult<()> {
             let file_meta = get_file_meta(files);
             if file_meta.is_empty() {
                 eprintln!("No files found.");
-                return Err(Box::new(io::Error::from(io::ErrorKind::NotFound)));
+                return Err(io::Error::from(io::ErrorKind::NotFound));
             }
 
             let total_size = file_meta.iter().fold(0, |acc, m| acc + m.size);
@@ -89,9 +89,9 @@ pub async fn send(state: &crate::AppState) -> crate::AsyncResult<()> {
                 let mut res = String::new();
                 while !(res.trim() == "y" || res.trim() == "yes") {
                     println!("[y] yes / [n] no");
-                    io::stdin().read_line(&mut res).await?;
+                    io::stdin().read_line(&mut res)?;
                     if res.trim() == "n" || res.trim() == "no" {
-                        return Err(Box::new(io::Error::from(io::ErrorKind::ConnectionAborted)));
+                        return Err(io::Error::from(io::ErrorKind::ConnectionAborted));
                     }
                 }
             } 
@@ -99,7 +99,7 @@ pub async fn send(state: &crate::AppState) -> crate::AsyncResult<()> {
             // continue - establish connection
 
         },
-        _ => return Err(Box::new(std::io::Error::from(std::io::ErrorKind::Other)))
+        _ => return Err(std::io::Error::from(std::io::ErrorKind::Other))
     }
 
     Ok(())

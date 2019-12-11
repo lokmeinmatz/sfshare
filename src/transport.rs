@@ -1,25 +1,49 @@
-pub const FLAG_PING: u8 = 0x2f;
-pub const FLAG_PONG: u8 = 0x1f;
+
+/**
+# Protocol
+
+## PING (client -> server)
+Asks server if he's active
+### Data send
+`[1 byte flag PING]`
+
+## PONG (server -> client)
+Response to a ping req
+### Data send
+`[1 byte flag PONG]`
+
+## ACK_REQ (client -> server)
+Asks if server wants to receive file(s)
+Transmitted as text
+## Data send
+`[1 byte flag ACK_REQ][2 byte length of string][string (length as described)]`
+*/
+pub mod flags {
+    pub const PING: u8 = 0x10;
+    pub const PONG: u8 = 0x20;
+    pub const ACK_REQ : u8 = 0x11;
+    pub const ACK_RES : u8 = 0x12;
+}
+
 
 
 #[derive(Debug)]
 pub enum Parsed {
     Ping,
-    Pong
+    Pong,
+    AckReq(String),
+    AckRes(bool)
 }
 
-use crate::AsyncResult;
-use async_std::net::TcpStream;
-use async_std::prelude::*;
-use async_std::io::{BufReader};
-use std::io::{Error, ErrorKind};
+use std::io::{self, Error, ErrorKind, BufReader, Read, Write};
+use std::net::TcpStream;
 
-pub async fn parse(stream: &mut TcpStream) -> AsyncResult<Parsed> {
+pub  fn parse(stream: &mut TcpStream) -> io::Result<Parsed> {
     let mut reader : BufReader<& TcpStream> = BufReader::new(stream);
 
     let packet_type : u8 = {
         let mut d = [0u8];
-        reader.read_exact(&mut d).await?;
+        reader.read_exact(&mut d)?;
         d[0]
     };
 
@@ -27,16 +51,20 @@ pub async fn parse(stream: &mut TcpStream) -> AsyncResult<Parsed> {
     println!("packet_type: {:X}", packet_type);
 
     match packet_type {
-        FLAG_PING => return Ok(Parsed::Ping),
-        FLAG_PONG => return Ok(Parsed::Pong),
+        flags::PING => return Ok(Parsed::Ping),
+        flags::PONG => return Ok(Parsed::Pong),
+        flags::ACK_REQ => {
+            let mut r_dat = [0u8, 0u8];
+            reader.read_exact(&mut r_dat)?;
+        }
         _ => {}
     }
 
-    Err(Box::new(Error::new(ErrorKind::InvalidData, "Can't parse stream")))
+    Err(Error::new(ErrorKind::InvalidData, "Can't parse stream"))
 }
 
-pub async fn send_slice(stream: &mut TcpStream, data: &[u8]) -> AsyncResult<()> {
+pub  fn send_slice(stream: &mut TcpStream, data: &[u8]) -> io::Result<()> {
     #[cfg(debug_assertions)]
     println!("sending Packet to {}", stream.peer_addr().map(|e| format!("{}", e)).unwrap_or_else(|e| e.to_string()));
-    stream.write_all(data).await.map_err(Box::from)
+    stream.write_all(data)
 }

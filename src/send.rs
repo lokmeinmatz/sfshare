@@ -17,10 +17,10 @@ impl std::fmt::Display for SendFiles {
         }
     }
 }
-use std::path::Path;
+
 use std::io;
 use std::net::{TcpStream, SocketAddr};
-
+use crate::transport::FileMeta;
 
 fn get_file_meta(files: &SendFiles) -> Vec<FileMeta> {
 
@@ -32,21 +32,7 @@ fn get_file_meta(files: &SendFiles) -> Vec<FileMeta> {
     }
 }
 
-struct FileMeta<'a> {
-    size: usize,
-    path: &'a Path
-}
 
-impl<'a> FileMeta<'a> {
-    fn from(path: &'a str) -> io::Result<FileMeta> {
-        let meta = std::fs::metadata(path)?;
-        
-        Ok(FileMeta {
-            size: meta.len() as usize,
-            path: Path::new(path)
-        })
-    }
-}
 use crate::transport;
 use std::io::Read;
 

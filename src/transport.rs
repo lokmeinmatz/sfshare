@@ -14,9 +14,9 @@ Response to a ping req
 
 ## ACK_REQ (client -> server)
 Asks if server wants to receive file(s)
-Transmitted as text
+Transmitted as list of `[4 byte file-id][8 byte file-size][2 byte name_len][name utf8]`
 ## Data send
-`[1 byte flag ACK_REQ][2 byte length of string][string (length as described)]`
+`[1 byte flag ACK_REQ][4 byte length of list][string (list)]`
 */
 pub mod flags {
     pub const PING: u8 = 0x10;
@@ -26,17 +26,44 @@ pub mod flags {
 }
 
 
+#[derive(Debug)]
+pub struct FileMeta {
+    pub size: u64,
+    pub path: PathBuf
+}
+
+impl FileMeta {
+    pub fn from(path: &str) -> io::Result<FileMeta> {
+        let meta = std::fs::metadata(path)?;
+
+        Ok(FileMeta {
+            size: meta.len(),
+            path: PathBuf::from(path)
+        })
+    }
+}
 
 #[derive(Debug)]
 pub enum Parsed {
     Ping,
     Pong,
-    AckReq(String),
+    AckReq(Vec<FileMeta>),
     AckRes(bool)
+}
+
+impl Parsed {
+    pub fn to_buf(&self) -> Box<[u8]> {
+        match self {
+            Parsed::Ping => Box::new([flags::PING]),
+            Parsed::Pong => Box::new([flags::PONG]),
+            _ => unimplemented!()
+        }
+    }
 }
 
 use std::io::{self, Error, ErrorKind, BufReader, Read, Write};
 use std::net::TcpStream;
+use std::path::PathBuf;
 
 pub  fn parse(stream: &mut TcpStream) -> io::Result<Parsed> {
     let mut reader : BufReader<& TcpStream> = BufReader::new(stream);

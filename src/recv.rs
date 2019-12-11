@@ -1,10 +1,11 @@
 use std::{
-    net::{TcpListener, ToSocketAddrs, IpAddr},
+    net::{TcpListener, IpAddr},
     io
 };
 use crate::transport;
 use crossterm::style::Colorize;
 use std::net::Ipv6Addr;
+use core::unicode::printable::is_printable;
 
 fn tcp_handler() -> io::Result<()> {
 
@@ -48,12 +49,20 @@ fn tcp_handler() -> io::Result<()> {
         match parsed {
             transport::Parsed::Ping => {
                 // send pong back
-                transport::send_slice(&mut stream, &[transport::flags::PONG])?;
+                transport::send_slice(&mut stream, transport::Parsed::Pong.to_buf().as_ref())?;
             },
             transport::Parsed::Pong => {
                 println!("Received pong... why?!");
             },
-            transport::Parsed::AckReq(req) =>
+            transport::Parsed::AckReq(req) => {
+                // ask if we ant to receive this
+                let mut file_size_sum = req.iter().fold(0, |acc, e| e.size + acc);
+
+                println!("{}", "New Transmission Request".yellow().on_dark_magenta());
+
+                println!("\nDo you want to receive {} file{} with a total size of {}mb")
+            },
+            _ => unimplemented!()
         }
 
     }

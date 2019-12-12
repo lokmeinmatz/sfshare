@@ -83,6 +83,23 @@ pub  fn send(state: &crate::AppState) -> io::Result<()> {
             } 
 
             // continue - establish connection
+            transport::send_slice(&mut stream, transport::Parsed::AckReq(vec![]).to_buf().as_ref())?;
+            println!("Asked receiver if he wants to receive files...\nWaiting for answer");
+            match transport::parse(&mut stream).unwrap() {
+                transport::Parsed::AckRes(ack) => {
+                    if !ack {
+                        eprintln!("The receiver didn't accept your request :( maybe next time");
+                        return Err(io::Error::from(io::ErrorKind::ConnectionRefused));
+                    }
+                },
+                _ => {
+                    eprintln!("Expected AckRes");
+                    return Err(io::Error::from(io::ErrorKind::InvalidData));
+                }
+            }
+
+            // receiver accepted request
+
 
         },
         _ => return Err(std::io::Error::from(std::io::ErrorKind::Other))

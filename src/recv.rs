@@ -5,7 +5,7 @@ use std::{
 use crate::transport;
 use crossterm::style::Colorize;
 use std::net::Ipv6Addr;
-use core::unicode::printable::is_printable;
+use std::intrinsics::transmute;
 
 fn tcp_handler() -> io::Result<()> {
 
@@ -33,14 +33,14 @@ fn tcp_handler() -> io::Result<()> {
 
     println!("Waiting for files...");
 
-    while let Some(stream) = incoming.next() { // 3
+    'new_con: while let Some(stream) = incoming.next() { // 3
         let mut stream = stream?;
 
         let parsed = match transport::parse(&mut stream) {
             Ok(p) => p,
             Err(e) => {
                 eprintln!("Unknown packet: {}", e);
-                continue
+                continue 'new_con;
             }
         };
         #[cfg(debug_assertions)]
@@ -56,11 +56,25 @@ fn tcp_handler() -> io::Result<()> {
             },
             transport::Parsed::AckReq(req) => {
                 // ask if we ant to receive this
-                let mut file_size_sum = req.iter().fold(0, |acc, e| e.size + acc);
+                let file_size_sum = req.iter().fold(0, |acc, e| e.size + acc);
 
                 println!("{}", "New Transmission Request".yellow().on_dark_magenta());
 
-                println!("\nDo you want to receive {} file{} with a total size of {}mb")
+                println!("\nDo you want to receive {} file{} with a total size of {}mb", req.len(), if req.len() > 1 {"s"} else {""}, file_size_sum as f64 / 1_000_000f64);
+
+                let mut l = String::new();
+                while l.trim() != "y" && l.trim() != "yes" {
+                    println!("[y, yes] / [n, no]")
+                    io::stdin().read_line(&mut l);
+                    if l.trim() == "n" || l.trim() == "no" {
+                        println!("You denied the request. Listening for new requests.");
+                        transport::send_slice(&mut stream, transport::Parsed::AckRes(false).to_buf().as_ref())?;
+                        continue 'new_con;
+                    }
+                }
+
+
+
             },
             _ => unimplemented!()
         }

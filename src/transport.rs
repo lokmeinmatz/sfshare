@@ -90,8 +90,8 @@ pub  fn parse(stream: &mut TcpStream) -> io::Result<Parsed> {
     Err(Error::new(ErrorKind::InvalidData, "Can't parse stream"))
 }
 
-pub  fn send_slice(stream: &mut TcpStream, data: &[u8]) -> io::Result<()> {
+pub  fn send_slice<W : Write>(stream: &mut W, data: &[u8]) -> io::Result<()> {
     #[cfg(debug_assertions)]
-    println!("sending Packet to {}", stream.peer_addr().map(|e| format!("{}", e)).unwrap_or_else(|e| e.to_string()));
+    println!("sending {} bytes", data.len());
     stream.write_all(data)
 }

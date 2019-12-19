@@ -64,7 +64,7 @@ fn tcp_handler() -> io::Result<()> {
 
                 let mut l = String::new();
                 while l.trim() != "y" && l.trim() != "yes" {
-                    println!("[y, yes] / [n, no]")
+                    println!("[y, yes] / [n, no]");
                     io::stdin().read_line(&mut l);
                     if l.trim() == "n" || l.trim() == "no" {
                         println!("You denied the request. Listening for new requests.");

@@ -83,7 +83,7 @@ pub  fn send(state: &crate::AppState) -> io::Result<()> {
             } 
 
             // continue - establish connection
-            transport::send_slice(&mut stream, transport::Parsed::AckReq(vec![]).to_buf().as_ref())?;
+            transport::send_slice(&mut stream, transport::Parsed::AckReq(file_meta).to_buf().as_ref())?;
             println!("Asked receiver if he wants to receive files...\nWaiting for answer");
             match transport::parse(&mut stream).unwrap() {
                 transport::Parsed::AckRes(ack) => {

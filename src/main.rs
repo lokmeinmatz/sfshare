@@ -1,74 +1,67 @@
-use clap::{App, Arg, SubCommand};
-use std::io::{self, stdout, Write};
-use crossterm::{queue, cursor};
 use crossterm::style::{self, Colorize};
+use crossterm::{cursor, queue};
+use std::env;
+use std::io::{self, stdout, Write};
 
-mod send;
 mod recv;
+mod send;
 mod transport;
+mod utils;
+
+use utils::s_contains;
 
 pub enum AppState {
-    Send{
+    Send {
         to: std::net::SocketAddr,
-        files: send::SendFiles
+        files: send::SendFiles,
     },
-    Recv,
-    Unknown(&'static str),
+    Recv
 }
 
-
 fn main() -> std::io::Result<()> {
-    let app = App::new("SimpleFileShare")
-        .version("0.1.0")
-        .about("Can send files from one device to another")
-        .author("lokmeinmatz (Matthias Kind)")
-        .subcommand(SubCommand::with_name("send").arg(Arg::with_name("RECEIVER")
-            .required(true)
-            .index(1)
-        ))
-        .subcommand(SubCommand::with_name("recv"));
+    let args: Vec<String> = env::args().collect();
 
-    let bin_name = app.get_bin_name().unwrap_or("./sfshare").to_owned();
-    let matches = app.get_matches();
 
-    let state = if let Some(send_matches) = matches.subcommand_matches("send") {
-        send::match_send(send_matches)
-    }
-    else if let Some(recv_matches) = matches.subcommand_matches("recv") {
+
+    let bin_name = &args[0];
+
+    let state = if s_contains(&args, "send") {
+        send::match_send(&args)?
+    } else if s_contains(&args, "recv") {
         AppState::Recv
-    }
-    else { AppState::Unknown("Unknown usage") };
+    } else {
+        println!("No mode specified!\nUsage:\n\t{binname} recv\t\t| waits for files\n\t{binname} send [addr ipv6 / ipv4] [list of files]", binname = bin_name);
+        return Err(std::io::Error::from(std::io::ErrorKind::InvalidInput));
+    };
 
-
-    print_info(&state, &bin_name).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+    print_info(&state).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
 
     match state {
-        AppState::Send{..} => {
+        AppState::Send { .. } => {
             send::send(&state)?;
-        },
+        }
         AppState::Recv => {
             recv::recv()?;
-        },
-        AppState::Unknown(err) => return Err(io::Error::new(io::ErrorKind::InvalidInput, err))
+        }
     }
 
     Ok(())
 }
 
-fn print_info(state: &AppState, bin_name: &str) -> crossterm::Result<()> {
+fn print_info(state: &AppState) -> crossterm::Result<()> {
     let mut stdout = stdout();
-        let cpos = cursor::position()?;
-        queue!(stdout, 
-            style::PrintStyledContent("Simple File Share\n".magenta()),
-            cursor::MoveDown(1)
-        )?;
+    let cpos = cursor::position()?;
+    queue!(
+        stdout,
+        style::PrintStyledContent("Simple File Share\n".magenta()),
+        cursor::MoveDown(1)
+    )?;
 
-        match state {
-            AppState::Send{to, files} => println!("Sending {} to {}", files, to),
-            &AppState::Recv => println!("Waiting for files to receive"),
-            AppState::Unknown(err) => println!("Error: {}\n > Please type {} --help for usage!", err.white().on_red(), bin_name)
-        }
+    match state {
+        AppState::Send { to, files } => println!("Sending {} to {}", files, to),
+        &AppState::Recv => println!("Waiting for files to receive"),
+    }
 
-        stdout.flush()?;
-        Ok(())
+    stdout.flush()?;
+    Ok(())
 }

@@ -6,10 +6,14 @@ pub mod flags {
     pub const ACK_REQ: u8 = 0x11;
     pub const ACK_RES: u8 = 0x12;
 
+    pub const FILE_BLOCK: u8 = 0x21;
+    pub const FILE_END: u8 = 0x22;
+
 }
 
+pub const CHECKSUM_MOD : u64 = 2147483647;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FileMeta {
     pub size: u64,
     pub id: u32,
@@ -124,13 +128,27 @@ pub enum Parsed {
     Pong,
     AckReq(Vec<FileMeta>),
     AckRes(bool),
+    FileBlock{ id: u32, data: Vec<u8> },
+    FileEnd(u64)
 }
 
 impl Parsed {
     pub fn to_buf(&self) -> Box<[u8]> {
-        #[cfg(debug_assertions)]
-        println!("{:?}.to_buf()", self);
 
+/*
+        #[cfg(debug_assertions)]
+            {
+                match self {
+                    Parsed::FileBlock {id, data} => {
+                        println!("FileBlock {{ id: {}, block_size: {} }}.to_buf()", id, data.len());
+                    },
+                    p @ _ => {
+                        println!("{:?}.to_buf()", self);
+                    }
+                }
+
+            }
+*/
         match self {
             Parsed::Ping => Box::new([flags::PING]),
             Parsed::Pong => Box::new([flags::PONG]),
@@ -147,7 +165,25 @@ impl Parsed {
 
                 res.into_boxed_slice()
             }
-            Parsed::AckRes(ack) => Box::new([flags::ACK_RES, (*ack) as u8]), // TODO not finished
+            Parsed::AckRes(ack) => Box::new([flags::ACK_RES, (*ack) as u8]),
+            Parsed::FileBlock {id, data} => {
+                let mut res = Vec::with_capacity(7 + data.len());
+
+                res.push(flags::FILE_BLOCK);
+                res.extend_from_slice(&(*id).to_be_bytes());
+
+                res.extend_from_slice(&(data.len() as u16).to_be_bytes());
+
+                res.extend_from_slice(&data);
+
+                res.into_boxed_slice()
+            },
+            Parsed::FileEnd(cs) => {
+                let mut res = Vec::with_capacity(9);
+                res.push(flags::FILE_END);
+                res.extend_from_slice(&(*cs).to_be_bytes());
+                res.into_boxed_slice()
+            }
             _ => unimplemented!(),
         }
     }
@@ -157,8 +193,7 @@ use std::io::{self, BufReader, Error, ErrorKind, Read, Write};
 use std::net::TcpStream;
 use std::path::PathBuf;
 
-pub fn parse(stream: &mut TcpStream) -> io::Result<Parsed> {
-    let mut reader: BufReader<&TcpStream> = BufReader::new(stream);
+pub fn parse(reader: &mut BufReader<TcpStream>) -> io::Result<Parsed> {
 
     let packet_type: u8 = {
         let mut d = [0u8];
@@ -181,7 +216,7 @@ pub fn parse(stream: &mut TcpStream) -> io::Result<Parsed> {
 
             for i in 0..list_len {
                 // parse next list item
-                match FileMeta::from_byte_stream(&mut reader) {
+                match FileMeta::from_byte_stream(reader) {
                     Ok(fm) => meta.push(fm),
                     Err(_) => {
                         eprintln!("could not construct FileMeta for {}th file", i);
@@ -194,8 +229,32 @@ pub fn parse(stream: &mut TcpStream) -> io::Result<Parsed> {
         },
         flags::ACK_RES => {
             let mut b = [0u8];
-            reader.read_exact(&mut b);
+            reader.read_exact(&mut b)?;
             return Ok(Parsed::AckRes(b[0] != 0));
+        },
+        flags::FILE_BLOCK => {
+            let mut b: [u8; 4] = [0; 4];
+            reader.read_exact(&mut b)?;
+            let f_id = u32::from_be_bytes(b);
+            let mut b: [u8; 2] = [0; 2];
+            reader.read_exact(&mut b)?;
+            let b_size = u16::from_be_bytes(b);
+
+            let mut data = vec![0u8; b_size as usize];
+
+            reader.read_exact(&mut data)?;
+
+            assert_eq!(data.len(), b_size as usize);
+
+            return Ok(Parsed::FileBlock {
+                id: f_id,
+                data
+            });
+        },
+        flags::FILE_END => {
+            let mut b = [0u8; 8];
+            reader.read_exact(&mut b)?;
+            return Ok(Parsed::FileEnd(u64::from_be_bytes(b)));
         }
         _ => {}
     }

@@ -50,7 +50,6 @@ fn main() -> std::io::Result<()> {
 
 fn print_info(state: &AppState) -> crossterm::Result<()> {
     let mut stdout = stdout();
-    let cpos = cursor::position()?;
     queue!(
         stdout,
         style::PrintStyledContent("Simple File Share\n".magenta()),

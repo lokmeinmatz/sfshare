@@ -114,10 +114,14 @@ pub fn send(state: &crate::AppState) -> io::Result<()> {
             }
 
             println!("starting to send files...");
+            let start = std::time::Instant::now();
             // receiver accepted request
             for (i, fm) in file_meta.iter().enumerate() {
                 send_file(fm, &mut stream, (i, file_meta.len()))?;
             }
+
+
+            println!("Took {}s", start.elapsed().as_secs_f64());
 
         }
         _ => return Err(std::io::Error::from(std::io::ErrorKind::Other)),

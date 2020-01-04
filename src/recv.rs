@@ -6,10 +6,11 @@ use std::{
     net::{IpAddr, TcpListener},
 };
 use crate::transport::{Parsed, FileMeta};
-use std::io::{BufWriter, BufReader};
+use std::io::{BufWriter, BufReader, Write};
 use std::fs::File;
 use std::collections::{HashSet, HashMap};
 use std::iter::FromIterator;
+use std::path::PathBuf;
 
 fn tcp_handler() -> io::Result<()> {
     #[cfg(debug_assertions)]
@@ -51,8 +52,21 @@ fn tcp_handler() -> io::Result<()> {
             let parsed = match transport::parse(&mut reader) {
                 Ok(p) => p,
                 Err(e) => {
-                    eprintln!("Unknown packet: {}", e);
-                    continue 'new_packet;
+                    match e.kind() {
+                        io::ErrorKind::UnexpectedEof => {
+                            // connection is closed
+                            println!("Connection closed");
+                            continue 'new_con;
+                        },
+                        io::ErrorKind::InvalidData => {
+                            eprintln!("Unknown packet / invalid data: {}", e);
+                            continue 'new_packet;
+                        }
+                        _ => {
+                            eprintln!("Unknown error {} : try again or contact developer!", e);
+                            return Err(e)
+                        }
+                    }
                 }
             };
             #[cfg(debug_assertions)]
@@ -106,16 +120,28 @@ fn tcp_handler() -> io::Result<()> {
                         match transport::parse(&mut reader)? {
                             Parsed::FileBlock { id, data } => {
                                 current_file_checksum = (current_file_checksum + data.iter().fold(0u64, |acc, b| acc + *b as u64 )) % transport::CHECKSUM_MOD;
-                                match (current_file_meta, current_file_writer) {
+                                match (&mut current_file_meta, &mut current_file_writer) {
                                     (Some(meta), Some(writer)) => {
+                                        if meta.id != id {
+                                            return Err(io::Error::new(io::ErrorKind::PermissionDenied, "Wrong file id: not accepted"));
+                                        }
 
+                                        writer.write_all(&data)?;
                                     },
                                     _ => {
                                         // create new file if want to receive
-                                        if let Some(fm) = files_waiting.remove(&id) {
-                                            
-                                            current_file_meta = Some(fm);
+                                        if let Some(mut fm) = files_waiting.remove(&id) {
+                                            assert_eq!(fm.path, None);
 
+                                            let pbuf = PathBuf::from(format!("./{}", fm.name));
+
+                                            let mut bwriter = BufWriter::new(File::create(&pbuf)?);
+
+                                            bwriter.write_all(&data)?;
+
+                                            fm.path = Some(pbuf);
+                                            current_file_meta = Some(fm);
+                                            current_file_writer = Some(bwriter);
 
                                         }
                                         else {
@@ -130,7 +156,7 @@ fn tcp_handler() -> io::Result<()> {
                                     eprintln!("Checksum not identical! calculated: {} | received: {}", current_file_checksum, cs);
                                 }
                                 else {
-                                    println!("File transmission success");
+                                    println!("File transmission success! Checksum identical");
                                 }
                                 break;
                             }

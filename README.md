@@ -1,6 +1,20 @@
 # sfshare
 A simple file sharing utility written in Rust
+Uses TCP on port 5123
+Every file has a checksum and file-id so no not-requested files can be send + you get notified if transmission failed
 
+## Usage
+
+First start the program in receive-mode on one pc,
+then send files from sender to specific ip (should be displayed on receiver)
+
+### Receiving
+`./sfshare recv` and wait :D If sender wants to send files, accept with y
+
+### Sending
+`./sfshare send <ip> [patterns / filenames]`
+Selects all files matching the pattern(s) and tries to send them. if files are large
+you get asked if you really want to send those.
 
 # Protocol
 

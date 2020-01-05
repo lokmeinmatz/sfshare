@@ -1,4 +1,3 @@
-
 #[derive(Debug, Clone)]
 pub struct FileMeta {
     pub size: u64,
@@ -8,16 +7,14 @@ pub struct FileMeta {
 }
 
 impl FileMeta {
-    pub fn from(path: &str) -> io::Result<FileMeta> {
-        let meta = std::fs::metadata(path)?;
-        let pbuf = PathBuf::from(path);
+    pub fn from(path: PathBuf) -> io::Result<FileMeta> {
+        let meta = std::fs::metadata(&path)?;
 
-        let mut file_name = pbuf
+        let mut file_name = path
             .file_name()
             .and_then(|os| os.to_os_string().into_string().ok())
             .unwrap_or(String::new());
         file_name.truncate(std::u16::MAX as usize);
-
 
         let file_id: u32 = {
             use std::collections::hash_map::DefaultHasher;
@@ -27,12 +24,11 @@ impl FileMeta {
             (dh.finish() % std::u32::MAX as u64) as u32
         };
 
-
         Ok(FileMeta {
             size: meta.len(),
-            path: Some(pbuf),
+            path: Some(path),
             id: file_id,
-            name: file_name
+            name: file_name,
         })
     }
 
@@ -55,20 +51,18 @@ impl FileMeta {
             u16::from_be_bytes(b)
         };
 
-
         let f_name = {
             let mut collect = vec![0u8; f_name_len as usize];
             buf.read_exact(&mut collect)?;
             String::from_utf8(collect).map_err(|e| io::Error::new(ErrorKind::InvalidData, e))?
         };
 
-        Ok(FileMeta{
+        Ok(FileMeta {
             size: f_size,
             id: f_id,
             name: f_name,
-            path: None
+            path: None,
         })
-
     }
 
     pub fn to_byte_stream(&self) -> Vec<u8> {
@@ -82,7 +76,6 @@ impl FileMeta {
         let byte_size = 4 + 8 + 2 + file_name_bytes.len();
         let mut res = Vec::with_capacity(byte_size);
 
-        
         res.extend_from_slice(&self.id.to_be_bytes());
         res.extend_from_slice(&self.size.to_be_bytes());
         res.extend_from_slice(&(file_name_bytes.len() as u16).to_be_bytes());
@@ -95,7 +88,7 @@ impl FileMeta {
 
 #[test]
 fn test_bytestream() -> io::Result<()> {
-    let fm = FileMeta::from("test.dat")?;
+    let fm = FileMeta::from("test.dat".into())?;
 
     let bs = fm.to_byte_stream();
 
@@ -118,11 +111,9 @@ pub mod flags {
 
     pub const FILE_BLOCK: u8 = 0x21;
     pub const FILE_END: u8 = 0x22;
-
 }
 
-pub const CHECKSUM_MOD : u64 = 2147483647;
-
+pub const CHECKSUM_MOD: u64 = 2147483647;
 
 #[derive(Debug)]
 pub enum Parsed {
@@ -130,27 +121,26 @@ pub enum Parsed {
     Pong,
     AckReq(Vec<FileMeta>),
     AckRes(bool),
-    FileBlock{ id: u32, data: Vec<u8> },
-    FileEnd(u64)
+    FileBlock { id: u32, data: Vec<u8> },
+    FileEnd(u64),
 }
 
 impl Parsed {
     pub fn to_buf(&self) -> Box<[u8]> {
+        /*
+                #[cfg(debug_assertions)]
+                    {
+                        match self {
+                            Parsed::FileBlock {id, data} => {
+                                println!("FileBlock {{ id: {}, block_size: {} }}.to_buf()", id, data.len());
+                            },
+                            p @ _ => {
+                                println!("{:?}.to_buf()", self);
+                            }
+                        }
 
-/*
-        #[cfg(debug_assertions)]
-            {
-                match self {
-                    Parsed::FileBlock {id, data} => {
-                        println!("FileBlock {{ id: {}, block_size: {} }}.to_buf()", id, data.len());
-                    },
-                    p @ _ => {
-                        println!("{:?}.to_buf()", self);
                     }
-                }
-
-            }
-*/
+        */
         match self {
             Parsed::Ping => Box::new([flags::PING]),
             Parsed::Pong => Box::new([flags::PONG]),
@@ -168,7 +158,7 @@ impl Parsed {
                 res.into_boxed_slice()
             }
             Parsed::AckRes(ack) => Box::new([flags::ACK_RES, (*ack) as u8]),
-            Parsed::FileBlock {id, data} => {
+            Parsed::FileBlock { id, data } => {
                 let mut res = Vec::with_capacity(7 + data.len());
 
                 res.push(flags::FILE_BLOCK);
@@ -179,14 +169,13 @@ impl Parsed {
                 res.extend_from_slice(&data);
 
                 res.into_boxed_slice()
-            },
+            }
             Parsed::FileEnd(cs) => {
                 let mut res = Vec::with_capacity(9);
                 res.push(flags::FILE_END);
                 res.extend_from_slice(&(*cs).to_be_bytes());
                 res.into_boxed_slice()
             }
-            _ => unimplemented!(),
         }
     }
 }
@@ -196,15 +185,12 @@ use std::net::TcpStream;
 use std::path::PathBuf;
 
 pub fn parse(reader: &mut BufReader<TcpStream>) -> io::Result<Parsed> {
-
     let packet_type: u8 = {
         let mut d = [0u8];
         reader.read_exact(&mut d)?;
         d[0]
     };
 
-    #[cfg(debug_assertions)]
-    println!("packet_type: 0x{:X}", packet_type);
 
     match packet_type {
         flags::PING => return Ok(Parsed::Ping),
@@ -223,17 +209,17 @@ pub fn parse(reader: &mut BufReader<TcpStream>) -> io::Result<Parsed> {
                     Err(_) => {
                         eprintln!("could not construct FileMeta for {}th file", i);
                         return Err(io::Error::from(ErrorKind::InvalidData));
-                    },
+                    }
                 }
             }
 
             return Ok(Parsed::AckReq(meta));
-        },
+        }
         flags::ACK_RES => {
             let mut b = [0u8];
             reader.read_exact(&mut b)?;
             return Ok(Parsed::AckRes(b[0] != 0));
-        },
+        }
         flags::FILE_BLOCK => {
             let mut b: [u8; 4] = [0; 4];
             reader.read_exact(&mut b)?;
@@ -248,11 +234,8 @@ pub fn parse(reader: &mut BufReader<TcpStream>) -> io::Result<Parsed> {
 
             assert_eq!(data.len(), b_size as usize);
 
-            return Ok(Parsed::FileBlock {
-                id: f_id,
-                data
-            });
-        },
+            return Ok(Parsed::FileBlock { id: f_id, data });
+        }
         flags::FILE_END => {
             let mut b = [0u8; 8];
             reader.read_exact(&mut b)?;
@@ -261,7 +244,10 @@ pub fn parse(reader: &mut BufReader<TcpStream>) -> io::Result<Parsed> {
         _ => {}
     }
 
-    Err(Error::new(ErrorKind::InvalidData, "Can't parse stream: unknown packet type"))
+    Err(Error::new(
+        ErrorKind::InvalidData,
+        "Can't parse stream: unknown packet type",
+    ))
 }
 
 pub fn send_slice<W: Write>(stream: &mut W, data: &[u8]) -> io::Result<()> {

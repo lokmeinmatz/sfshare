@@ -1,16 +1,21 @@
 use crate::transport;
-use crossterm::style::Colorize;
+use crate::transport::{FileMeta, Parsed};
+
+use crossterm::style::{Colorize, Print};
+use crossterm::cursor::{MoveDown, MoveUp};
+use crossterm::terminal::{Clear, ClearType};
+use crossterm::{queue};
+
+use std::collections::{HashMap};
+use std::fs::File;
+use std::io::{BufReader, BufWriter, Write, stdout};
+use std::iter::FromIterator;
 use std::net::Ipv6Addr;
+use std::path::PathBuf;
 use std::{
     io,
     net::{IpAddr, TcpListener},
 };
-use crate::transport::{Parsed, FileMeta};
-use std::io::{BufWriter, BufReader, Write};
-use std::fs::File;
-use std::collections::{HashSet, HashMap};
-use std::iter::FromIterator;
-use std::path::PathBuf;
 
 fn tcp_handler() -> io::Result<()> {
     #[cfg(debug_assertions)]
@@ -46,7 +51,6 @@ fn tcp_handler() -> io::Result<()> {
         println!("new connection");
 
         'new_packet: loop {
-
             println!("waiting for next packet");
 
             let parsed = match transport::parse(&mut reader) {
@@ -57,14 +61,14 @@ fn tcp_handler() -> io::Result<()> {
                             // connection is closed
                             println!("Connection closed");
                             continue 'new_con;
-                        },
+                        }
                         io::ErrorKind::InvalidData => {
                             eprintln!("Unknown packet / invalid data: {}", e);
                             continue 'new_packet;
                         }
                         _ => {
                             eprintln!("Unknown error {} : try again or contact developer!", e);
-                            return Err(e)
+                            return Err(e);
                         }
                     }
                 }
@@ -83,6 +87,7 @@ fn tcp_handler() -> io::Result<()> {
                 transport::Parsed::AckReq(mut req) => {
                     // ask if we ant to receive this
                     let file_size_sum = req.iter().fold(0, |acc, e| e.size + acc);
+                    let files_total = req.len();
 
                     println!("{}", "New Transmission Request".yellow().on_dark_magenta());
 
@@ -107,32 +112,81 @@ fn tcp_handler() -> io::Result<()> {
                         }
                     }
 
-                    transport::send_slice(&mut stream, transport::Parsed::AckRes(true).to_buf().as_ref())?;
+                    transport::send_slice(
+                        &mut stream,
+                        transport::Parsed::AckRes(true).to_buf().as_ref(),
+                    )?;
 
-                    let mut files_waiting: HashMap<u32, FileMeta> = HashMap::from_iter(req.drain(..).map(|e| (e.id, e)));
+                    let mut files_waiting: HashMap<u32, FileMeta> =
+                        HashMap::from_iter(req.drain(..).map(|e| (e.id, e)));
 
                     // we need to store the current open file meta data
                     let mut current_file_meta: Option<FileMeta> = None;
                     let mut current_file_writer: Option<BufWriter<File>> = None;
                     let mut current_file_checksum = 0u64;
 
+                    queue!(stdout(), MoveDown(3)).unwrap();
+                    let mut blocks_till_redraw = 0;
+                    let mut bytes_recvd: u64 = 0;
+                    let mut files_received = 0;
                     loop {
                         match transport::parse(&mut reader)? {
                             Parsed::FileBlock { id, data } => {
-                                current_file_checksum = (current_file_checksum + data.iter().fold(0u64, |acc, b| acc + *b as u64 )) % transport::CHECKSUM_MOD;
+                                bytes_recvd += data.len() as u64;
+
+                                if blocks_till_redraw <= 0 || data.is_empty() {
+
+                                    let percent_send = bytes_recvd as f64 / file_size_sum as f64;
+
+                                    queue!(
+                                            stdout(),
+                                            MoveUp(3),
+                                            Clear(ClearType::CurrentLine),
+                                            Print(format!(
+                                                "Copying file with id {} | {}/{}\n",
+                                                id, files_received, files_total
+                                            )),
+                                            Clear(ClearType::CurrentLine),
+                                            Print(format!(
+                                                "{:.3}mb of {:.3}mb send ({:.2}%)\n",
+                                                (bytes_recvd as f64 / 1_000_000.0),
+                                                (file_size_sum as f64 / 1_000_000.0),
+                                                percent_send * 100.0
+                                            )),
+                                            Clear(ClearType::CurrentLine),
+                                            Print(format!(
+                                                "[{}>{}]\n",
+                                                "=".repeat((percent_send * 20.0).floor() as usize),
+                                                " ".repeat(((1.0 - percent_send) * 20.0).ceil() as usize)
+                                            ))
+                                        ).expect("Failed to display loading bar");
+                                    blocks_till_redraw = 20.min(file_size_sum as i64 / (data.len() as i64 * 10 + 1));
+                                }
+                                blocks_till_redraw -= 1;
+                                current_file_checksum = (current_file_checksum
+                                    + data.iter().fold(0u64, |acc, b| acc + *b as u64))
+                                    % transport::CHECKSUM_MOD;
                                 match (&mut current_file_meta, &mut current_file_writer) {
+
                                     (Some(meta), Some(writer)) => {
+
+
+
                                         if meta.id != id {
-                                            return Err(io::Error::new(io::ErrorKind::PermissionDenied, "Wrong file id: not accepted"));
+                                            return Err(io::Error::new(
+                                                io::ErrorKind::PermissionDenied,
+                                                "Wrong file id: not accepted",
+                                            ));
                                         }
 
                                         writer.write_all(&data)?;
-                                    },
+                                    }
                                     _ => {
+
                                         // create new file if want to receive
                                         if let Some(mut fm) = files_waiting.remove(&id) {
                                             assert_eq!(fm.path, None);
-
+                                            files_received += 1;
                                             let pbuf = PathBuf::from(format!("./{}", fm.name));
 
                                             let mut bwriter = BufWriter::new(File::create(&pbuf)?);
@@ -142,27 +196,34 @@ fn tcp_handler() -> io::Result<()> {
                                             fm.path = Some(pbuf);
                                             current_file_meta = Some(fm);
                                             current_file_writer = Some(bwriter);
-
-                                        }
-                                        else {
+                                        } else {
                                             eprintln!("Didn't await this file :/");
                                             // TODO handle wrong file id
                                         }
                                     }
                                 }
-                            },
+                            }
                             Parsed::FileEnd(cs) => {
                                 if cs != current_file_checksum {
-                                    eprintln!("Checksum not identical! calculated: {} | received: {}", current_file_checksum, cs);
-                                }
-                                else {
+                                    eprintln!(
+                                        "Checksum not identical! calculated: {} | received: {}",
+                                        current_file_checksum, cs
+                                    );
+                                } else {
                                     println!("File transmission success! Checksum identical");
+                                    current_file_meta = None;
+                                    current_file_writer = None;
+                                    current_file_checksum = 0;
                                 }
-                                break;
+
+                                if files_waiting.is_empty() {
+                                    println!("All files received!");
+                                    continue 'new_con;
+                                }
                             }
                             e => {
                                 eprintln!("Received wrong packet :( : {:?}", e);
-                                continue 'new_con
+                                continue 'new_con;
                             }
                         }
                     }
@@ -170,8 +231,6 @@ fn tcp_handler() -> io::Result<()> {
                 _ => unimplemented!(),
             }
         }
-
-
     }
 
     Ok(())
